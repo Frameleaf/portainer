@@ -23,13 +23,15 @@ jobs:
             file=$(jq -r '.repository.stackfile' <<<"$t")
             test "$(jq -r '.repository.url' <<<"$t")" = "https://github.com/$GITHUB_REPOSITORY"
             test -f "$file"
-            for name in $(grep -o '\${[A-Z_]*' "$file" | cut -c3- | sort -u); do
+            # Compose variables only: $${...} is escaped for the container's own shell.
+            grep -oE '(^|[^$])[$][{][A-Z_]+' "$file" | sed 's/.*{//' | sort -u | while read -r name; do
               jq -e --arg n "$name" '[.env[].name] | index($n)' <<<"$t" >/dev/null || { echo "$file uses $name, which the template does not define"; exit 1; }
             done
           done
       - name: Start the Frameleaf stack as Portainer would
         run: |
-          export DB_PASSWORD="ci$(openssl rand -hex 16)"
+          DB_PASSWORD="ci$(openssl rand -hex 16)"
+          export DB_PASSWORD
           docker compose -p frameleaf -f stacks/frameleaf.yml up -d --quiet-pull
           for _ in $(seq 1 60); do
             if curl -fsS http://127.0.0.1:2283/api/server/ping; then echo; break; fi
